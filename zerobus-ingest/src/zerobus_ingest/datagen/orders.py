@@ -101,13 +101,13 @@ class Orders:
         return [order.SerializeToString() for order in orders]
 
     @staticmethod
-    def generate_orders(count: int = 1, seed: int | None = None) -> list[Order]:
+    def generate_orders(count: int = 1, seed: int | None = None, validate: bool = False) -> list[Order]:
         """Generate `count` Order messages using the orders.v1 protobuf classes."""
         if seed is not None:
             random.seed(seed)
         now = int(time.time())
         orders: list[Order] = []
-        for i in range(count):
+        while len(orders) < count:
             order_id = str(uuid.uuid4())
             customer_id = random.choice(Orders._CUSTOMER_IDS)
             num_items = random.randint(1, 4)
@@ -156,10 +156,13 @@ class Orders:
             o.created_at = now
             o.updated_at = now
 
-            try:
-                protovalidate.validate(o)
-            except Exception as e:
-                print(f"Validation: {e}", file=sys.stderr)
-            orders.append(o)
+            if validate:
+                try:
+                    protovalidate.validate(o)
+                    orders.append(o)
+                except Exception as e:
+                    print(f"Validation: {e}", file=sys.stderr)
+            else:
+                orders.append(o)
 
         return orders

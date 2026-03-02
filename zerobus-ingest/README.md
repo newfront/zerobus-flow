@@ -74,31 +74,93 @@ uv run main.py --env prod   # prod (loads .env-prod)
 
 ### Generate mode
 
-Use `--generate` to create sample order records (Order protobufs) and print them to stdout. The number of records is controlled with `--count` (default: 100).
+Use `--generate` to create sample order records (Order protobufs) and print them to stdout. The number of records is controlled with `--count` (default: 100). With `--validate`, each generated order is checked with protovalidate; only valid orders count toward `--count`, so you always get the requested number of valid orders.
 
 ```bash
 uv run main.py --generate                    # generate 100 orders (default count)
 uv run main.py --generate --count 50         # generate 50 orders
-uv run main.py --generate --count 500        # generate 500 orders
+uv run main.py --generate --validate        # generate 100 orders, skip any that fail validation
+uv run main.py --generate --count 500 --validate
 uv run main.py --env prod --generate --count 200   # prod env, 200 orders
 ```
 
 ### Publish mode
 
-Use `--publish` to generate orders and publish each one to Zerobus (same `--count` and env as generate). Requires `ZEROBUS_*` and `UC_*` env vars.
+Use `--publish` to generate orders and publish each one to Zerobus (same `--count` and env as generate). Requires `ZEROBUS_*` and `UC_*` env vars. By default the sync `ZerobusWriter` is used; add `--async-publish` to use the async writer and record offsets per session. Use `--validate` when generating (without `--orders-file`) so only valid orders are published.
 
 ```bash
-uv run main.py --publish                      # generate and publish 100 orders
+uv run main.py --publish                      # generate and publish 100 orders (sync)
 uv run main.py --publish --count 20           # generate and publish 20 orders
+uv run main.py --publish --validate           # generate 100 valid orders and publish
+uv run main.py --publish --async-publish      # async writer, records offsets per session
+uv run main.py --publish --async-publish --count 50
 uv run main.py --env prod --publish --count 50
 ```
 
-| Option       | Default | Description |
-|-------------|--------|-------------|
-| `--env`     | dev    | Environment: `dev` (loads `.env`) or `prod` (loads `.env-prod`). |
-| `--generate` | off   | Generate sample orders via `datagen.Orders.generate_orders()` and print to stdout. |
-| `--publish` | off    | Generate orders and publish each to Zerobus via `ZerobusWriter`. |
-| `--count`   | 100    | Number of records to generate when `--generate` or `--publish` is set. |
+| Option            | Default | Description |
+|-------------------|--------|-------------|
+| `--env`           | dev    | Environment: `dev` (loads `.env`) or `prod` (loads `.env-prod`). |
+| `--generate`      | off    | Generate sample orders via `datagen.Orders.generate_orders()` and print to stdout. |
+| `--publish`       | off    | Generate orders and publish each to Zerobus via `ZerobusWriter` (sync) or `AsyncZerobusWriter` (if `--async-publish`). |
+| `--async-publish` | off    | Use async writer with `--publish`; records offsets per session and uses default ack callback for progress logging. |
+| `--count`         | 100    | Number of records to generate when `--generate` or `--publish` is set. |
+| `--validate`     | off    | When generating orders, validate each with protovalidate; only valid orders count toward `--count`. Use with `--generate`, `--publish`, or `--generate-orders-file`. |
+| `--generate-orders-file` | —  | Path to write generated orders to a **binary file** (length-delimited protobuf). Use with `--count` (e.g. 10k orders). |
+| `--orders-file`          | —  | Path to a .bin file from `--generate-orders-file`. Load orders from file instead of generating (for reproducible testing with `--publish` or `--generate`). Optional `--count` uses only the first N orders. |
+
+### Generate orders to a binary file
+
+Generate a large batch of orders and store them in a single binary file (length-delimited: each record is varint length + serialized `Order` bytes). No proto change required; read the file back into a `list[Order]` in one call. Useful for benchmarks, replay, or feeding the same dataset to publish multiple times. Use `--validate` to ensure only protovalidate-valid orders are written.
+
+```bash
+uv run main.py --generate-orders-file orders_10k.bin --count 10000
+uv run main.py --generate-orders-file orders_10k.bin --count 10000 --validate   # only valid orders
+```
+
+Then in Python:
+
+```python
+from zerobus_ingest.utils import read_orders_from_binary
+
+orders = read_orders_from_binary("orders_10k.bin")  # list[Order]
+```
+
+To write orders to a file from code (e.g. after custom generation):
+
+```python
+from zerobus_ingest.datagen import Orders
+from zerobus_ingest.utils import write_orders_to_binary
+
+orders = Orders.generate_orders(10_000, seed=42)
+write_orders_to_binary("orders_10k.bin", orders)
+
+# With validation: only valid orders count toward the requested count
+orders = Orders.generate_orders(10_000, seed=42, validate=True)
+write_orders_to_binary("orders_10k.bin", orders)
+```
+
+### Reproducible testing: load orders from a .bin file
+
+Use `--orders-file` to run `--publish` or `--generate` with a fixed dataset from a previously saved .bin file instead of random generation. Same orders every run for non-random testing.
+
+**Example workflow**
+
+1. Create a fixed dataset once (e.g. 10k orders).
+2. Publish from that file (all records, or first N with `--count`).
+3. Optionally print orders from file for inspection.
+
+```bash
+# 1) Create a fixed dataset once
+uv run main.py --generate-orders-file orders_10k.bin --count 10000
+
+# 2) Publish from that file (all 10k, or first N with --count)
+uv run main.py --publish --orders-file orders_10k.bin
+uv run main.py --publish --orders-file orders_10k.bin --count 100
+uv run main.py --publish --async-publish --orders-file orders_10k.bin --count 500
+
+# 3) Or print orders from file (e.g. first 5)
+uv run main.py --generate --orders-file orders_10k.bin --count 5
+```
 
 ---
 
@@ -340,3 +402,99 @@ This matches what the CLI does with `uv run main.py --publish --count 50`.
 | `writer.flush()` | Flush the stream. |
 | `writer.close()` | Close the stream and release resources. Use `with ZerobusWriter.from_config(config) as writer:` to close automatically. |
 | `ZerobusWriter.get_descriptor(record)` | Static: return the record’s `DESCRIPTOR` if it is a protobuf message, else `None`. Useful in tests to assert the descriptor used for `TableProperties` (e.g. `assert ZerobusWriter.get_descriptor(order).full_name == "orders.v1.Order"`). |
+
+---
+
+## AsyncZerobusWriter
+
+`AsyncZerobusWriter` uses the Zerobus async SDK (`zerobus.sdk.aio`) for async ingestion. Use it when you are already in an async context (e.g. FastAPI, aiohttp) or when you want per-record offsets and fire-and-forget options. Default stream options include `record_type=RecordType.PROTO`, `max_inflight_records=5_000`, `recovery=True`, and an optional ack callback for progress logging.
+
+### When to use async vs sync
+
+- **Sync (`ZerobusWriter`)** — Simple scripts, CLI `--publish` without `--async-publish`, or when you prefer blocking `write()` and `ack.wait_for_ack()`.
+- **Async (`AsyncZerobusWriter`)** — Async apps, or when you need `write_offset()` for session offsets, batch/offset methods, or fire-and-forget (`write_nowait` / `write_batch_nowait`). The CLI uses it when you pass `--publish --async-publish`.
+
+### Config
+
+Same config shape as `ZerobusWriter`: use `from_config(config)` (and optionally `ack_callback=...)`). The same env vars and `Config.databricks()` apply.
+
+### ZerobusWriteCallback
+
+`ZerobusWriteCallback` logs progress every N acks and can forward to an inner callback. It is used as the default ack callback when you don't pass one to `AsyncZerobusWriter.from_config()`. You can pass a custom instance or another object that implements `on_ack(offset)`.
+
+```python
+from zerobus_ingest.utils import ZerobusWriteCallback, AsyncZerobusWriter
+
+# Default: log every 100 acks
+callback = ZerobusWriteCallback(log_every_n=100)
+writer = AsyncZerobusWriter.from_config(config, ack_callback=callback)
+
+# With inner callback (e.g. your own AckCallback-like object)
+inner = MyAckHandler()
+callback = ZerobusWriteCallback(inner=inner, log_every_n=50)
+writer = AsyncZerobusWriter.from_config(config, ack_callback=callback)
+```
+
+### Basic usage (async)
+
+Use `async with AsyncZerobusWriter.from_config(config) as writer:` and await `write_offset(record)` to ingest one record and get back the result (offset/ack). Then `await writer.flush()` and the context manager will call `await writer.close()`.
+
+```python
+import asyncio
+from dotenv import load_dotenv
+
+from zerobus_ingest.config import Config
+from zerobus_ingest.datagen import Orders
+from zerobus_ingest.utils import AsyncZerobusWriter
+
+load_dotenv()
+config = Config.databricks()
+orders = Orders.generate_orders(count=50, seed=42)
+
+async def publish():
+    async with AsyncZerobusWriter.from_config(config) as writer:
+        for order in orders:
+            await writer.write_offset(order)  # records offset per record
+        await writer.flush()
+    print(f"Published {len(orders)} orders (async).")
+
+asyncio.run(publish())
+```
+
+This matches what the CLI does with `uv run main.py --publish --async-publish --count 50`.
+
+### Overriding stream options
+
+Use `with_stream_options()` before opening the stream (e.g. before the first write) to override defaults (e.g. `max_inflight_records` or a custom ack callback):
+
+```python
+from zerobus.sdk.shared.definitions import RecordType, StreamConfigurationOptions
+from zerobus_ingest.utils import AsyncZerobusWriter, ZerobusWriteCallback
+
+opts = StreamConfigurationOptions(
+    record_type=RecordType.PROTO,
+    max_inflight_records=10_000,
+    recovery=True,
+    ack_callback=ZerobusWriteCallback(log_every_n=200),
+)
+writer = AsyncZerobusWriter.from_config(config).with_stream_options(opts)
+async with writer as w:
+    for order in orders:
+        await w.write_offset(order)
+    await w.flush()
+```
+
+### API summary (async)
+
+| Method / API | Description |
+|--------------|-------------|
+| `AsyncZerobusWriter.from_config(config, ack_callback=...)` | Build an async writer from a config dict. Optional `ack_callback` (default: `ZerobusWriteCallback()` for progress logging). |
+| `writer.with_stream_options(options)` | Override stream options (e.g. `max_inflight_records`, `ack_callback`). Call before first write. |
+| `await writer.write_offset(record)` | Ingest one record and return the result (offset/ack). Use for recording offsets per session. |
+| `await writer.write_batch_offset(records)` | Ingest a batch and return a list of results (one per record). |
+| `writer.write_nowait(record)` | Fire-and-forget: queue one record without waiting (must be called from an async context with a running loop). |
+| `writer.write_batch_nowait(records)` | Fire-and-forget: queue a batch without waiting. |
+| `await writer.flush()` | Flush the stream and wait for durability. |
+| `await writer.close()` | Close the stream. Use `async with AsyncZerobusWriter.from_config(config) as writer:` to close automatically. |
+| `AsyncZerobusWriter.get_descriptor(record)` | Static: same as `ZerobusWriter.get_descriptor(record)`. |
+| `ZerobusWriteCallback(inner=..., log_every_n=100)` | Ack callback that logs every N acks and optionally forwards to an inner callback. |

@@ -1,12 +1,13 @@
-"""Tests for ZerobusWriter (get_descriptor only; rest requires Databricks)."""
+"""Tests for ZerobusWriter, ZerobusWriteCallback, and AsyncZerobusWriter."""
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from dotenv import load_dotenv
 
 from zerobus_ingest.config import Config
 from zerobus_ingest.datagen import Orders
-from zerobus_ingest.utils import ZerobusWriter
+from zerobus_ingest.utils import AsyncZerobusWriter, ZerobusWriteCallback, ZerobusWriter
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _ENV_FILE = _REPO_ROOT / ".env"
@@ -54,6 +55,107 @@ def test_get_descriptor_from_generated_order():
     assert descriptor is order.DESCRIPTOR
     assert descriptor.name == "Order"
     assert descriptor.full_name == "orders.v1.Order"
+
+
+def test_zerobus_write_callback_increments_count():
+    """ZerobusWriteCallback increments ack count on each on_ack."""
+    cb = ZerobusWriteCallback(log_every_n=100)
+    assert cb._ack_count == 0
+    cb.on_ack(1)
+    assert cb._ack_count == 1
+    cb.on_ack(2)
+    cb.on_ack(3)
+    assert cb._ack_count == 3
+
+
+def test_zerobus_write_callback_forwards_to_inner():
+    """ZerobusWriteCallback forwards on_ack to inner callback when provided."""
+    inner = MagicMock()
+    cb = ZerobusWriteCallback(inner=inner, log_every_n=1000)
+    cb.on_ack(42)
+    inner.on_ack.assert_called_once_with(42)
+
+
+def test_zerobus_write_callback_logs_every_n(caplog):
+    """ZerobusWriteCallback logs progress every log_every_n acks."""
+    import logging
+
+    caplog.set_level(logging.INFO)
+    cb = ZerobusWriteCallback(log_every_n=2)
+    cb.on_ack(1)
+    assert "Acknowledged" not in caplog.text
+    cb.on_ack(2)
+    assert "Acknowledged" in caplog.text and "batch #2" in caplog.text
+
+
+def test_async_zerobus_writer_get_descriptor():
+    """AsyncZerobusWriter.get_descriptor matches ZerobusWriter for Order messages."""
+    orders = Orders.generate_orders(1, seed=42)
+    order = orders[0]
+    assert AsyncZerobusWriter.get_descriptor(order) is not None
+    assert AsyncZerobusWriter.get_descriptor(order) is order.DESCRIPTOR
+    assert AsyncZerobusWriter.get_descriptor({}) is None
+
+
+def test_async_zerobus_writer_from_config():
+    """AsyncZerobusWriter.from_config builds writer with correct table name and options."""
+    config = {
+        "host": "h",
+        "workspace_url": "https://example.databricks.com",
+        "workspace_id": "ws-id",
+        "region": "us-east-1",
+        "zerobus_client_id": "cid",
+        "zerobus_client_secret": "secret",
+        "catalog": "cat",
+        "schema": "sch",
+        "table": "tbl",
+    }
+    writer = AsyncZerobusWriter.from_config(config)
+    assert writer._table_name == "cat.sch.tbl"
+    assert writer._stream_options is not None
+    assert writer._stream is None
+    assert writer._sdk is None
+
+
+def test_async_zerobus_writer_from_config_with_ack_callback():
+    """AsyncZerobusWriter.from_config accepts optional ack_callback."""
+    config = {
+        "host": "h",
+        "workspace_url": "https://example.databricks.com",
+        "workspace_id": "ws-id",
+        "region": "us-east-1",
+        "zerobus_client_id": "cid",
+        "zerobus_client_secret": "secret",
+        "catalog": "cat",
+        "schema": "sch",
+        "table": "tbl",
+    }
+    custom_cb = ZerobusWriteCallback(log_every_n=50)
+    writer = AsyncZerobusWriter.from_config(config, ack_callback=custom_cb)
+    assert writer._stream_options is not None
+    assert writer._stream_options.ack_callback is custom_cb
+
+
+def test_async_zerobus_writer_with_stream_options():
+    """AsyncZerobusWriter.with_stream_options overwrites options and returns self."""
+    from zerobus.sdk.shared.definitions import RecordType, StreamConfigurationOptions
+
+    config = {
+        "host": "h",
+        "workspace_url": "https://example.databricks.com",
+        "workspace_id": "ws-id",
+        "region": "us-east-1",
+        "zerobus_client_id": "cid",
+        "zerobus_client_secret": "secret",
+        "catalog": "cat",
+        "schema": "sch",
+        "table": "tbl",
+    }
+    writer = AsyncZerobusWriter.from_config(config)
+    opts = StreamConfigurationOptions(record_type=RecordType.PROTO, max_inflight_records=100)
+    out = writer.with_stream_options(opts)
+    assert out is writer
+    assert writer._stream_options is opts
 
 
 # @pytest.mark.skipif(
