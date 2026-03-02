@@ -18,9 +18,13 @@ if __name__ == "__main__":
         client,
         generate=args.generate,
         publish=args.publish,
+        async_publish=args.async_publish,
         count=args.count,
         config=config if (args.publish or args.create_table) else None,
         create_table=args.create_table,
         descriptor_path=args.descriptor_path,
         message_name=args.message_name,
+        generate_orders_file=args.generate_orders_file,
+        orders_file=args.orders_file,
+        validate=args.validate,
     )

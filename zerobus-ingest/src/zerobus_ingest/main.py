@@ -1,6 +1,7 @@
 """CLI and main entry logic for zerobus-ingest."""
 
 import argparse
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,13 @@ from google.protobuf.descriptor_pool import DescriptorPool
 from zerobus.sdk.shared.definitions import RecordType, StreamConfigurationOptions
 
 from zerobus_ingest.datagen import Orders
-from zerobus_ingest.utils import TableUtils, ZerobusWriter
+from zerobus_ingest.utils import (
+    AsyncZerobusWriter,
+    TableUtils,
+    ZerobusWriter,
+    read_orders_from_binary,
+    write_orders_to_binary,
+)
 
 
 def _load_descriptor_from_binary(path: str | Path, message_name: str):
@@ -38,6 +45,25 @@ def _load_descriptor_from_binary(path: str | Path, message_name: str):
     return desc
 
 
+def _get_orders_for_run(
+    orders_file: str | None,
+    count: int,
+    *,
+    seed: int = 42,
+    validate: bool = False,
+) -> list[Any]:
+    """Return orders for --generate or --publish: from .bin file if --orders-file set, else generated."""
+    if orders_file:
+        path = Path(orders_file)
+        if not path.exists():
+            raise FileNotFoundError(f"Orders file not found: {path}")
+        orders = read_orders_from_binary(path)
+        if count < len(orders):
+            orders = orders[:count]
+        return orders
+    return Orders.generate_orders(count, seed=seed, validate=validate)
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -55,6 +81,11 @@ def parse_args():
         "--publish",
         action="store_true",
         help="Generate orders and publish each to Zerobus via ZerobusWriter.",
+    )
+    parser.add_argument(
+        "--async-publish",
+        action="store_true",
+        help="Use async writer (AsyncZerobusWriter) with --publish; records offsets per session.",
     )
     parser.add_argument(
         "--count",
@@ -84,18 +115,54 @@ def parse_args():
         help="Full protobuf message name, e.g. orders.v1.Order (required with "
         + "--create-table).",
     )
+    parser.add_argument(
+        "--generate-orders-file",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Generate orders and write them to a binary file (length-delimited "
+        + "protobuf). Use with --count (e.g. --count 10000).",
+    )
+    parser.add_argument(
+        "--orders-file",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Load orders from a .bin file (from --generate-orders-file) instead of "
+        + "generating. Use with --publish or --generate for reproducible testing. "
+        + "Optional --count limits to first N orders.",
+    )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="When generating orders (--generate, --publish, or --generate-orders-file), "
+        + "validate each order with protovalidate; only count valid orders toward --count.",
+    )
     return parser.parse_args()
+
+
+async def _publish_async(orders: list[Any], config: dict[str, Any]) -> None:
+    """Publish orders via AsyncZerobusWriter using write_offset for session offsets."""
+    async with AsyncZerobusWriter.from_config(config) as writer:
+        for order in orders:
+            await writer.write_offset(order)
+        await writer.flush()
+    print(f"Published {len(orders)} orders to Zerobus (async).")
 
 
 def main(
     workspace_client: WorkspaceClient,
     generate: bool | None = None,
     publish: bool | None = None,
+    async_publish: bool = False,
     count: int = 100,
     config: dict[str, Any] | None = None,
     create_table: bool = False,
     descriptor_path: str | None = None,
     message_name: str | None = None,
+    generate_orders_file: str | None = None,
+    orders_file: str | None = None,
+    validate: bool = False,
 ) -> None:
     # use workspace_client for Databricks API calls
     if create_table:
@@ -118,8 +185,13 @@ def main(
         print(f"Created table {catalog}.{schema}.{table}")
 
     if generate:
-        orders = Orders.generate_orders(count, seed=42)
+        orders = _get_orders_for_run(orders_file, count, validate=validate)
         print(orders)
+
+    if generate_orders_file:
+        orders = Orders.generate_orders(count, seed=42, validate=validate)
+        write_orders_to_binary(generate_orders_file, orders)
+        print(f"Wrote {len(orders)} orders to {generate_orders_file} (binary, length-delimited).")
 
     if publish:
         if not config:
@@ -135,14 +207,16 @@ def main(
                 f"Table {table_name} does not exist in the workspace. "
                 "Create the table before publishing."
             )
-        orders = Orders.generate_orders(count, seed=42)
-        stream_options = StreamConfigurationOptions(record_type=RecordType.PROTO)
-        with ZerobusWriter.from_config(config).with_stream_options(
-            stream_options
-        ) as writer:
-            for order in orders:
-                # we can use wait_for_ack()
-                ack = writer.write(order)
-                ack.wait_for_ack()
-            writer.flush()
-        print(f"Published {len(orders)} orders to Zerobus.")
+        orders = _get_orders_for_run(orders_file, count, validate=validate)
+        if async_publish:
+            asyncio.run(_publish_async(orders, config))
+        else:
+            stream_options = StreamConfigurationOptions(record_type=RecordType.PROTO)
+            with ZerobusWriter.from_config(config).with_stream_options(
+                stream_options
+            ) as writer:
+                for order in orders:
+                    ack = writer.write(order)
+                    ack.wait_for_ack()
+                writer.flush()
+            print(f"Published {len(orders)} orders to Zerobus.")

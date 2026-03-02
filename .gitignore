@@ -213,4 +213,7 @@ __marimo__/
 .idea
 */.idea
 
+# generation of binary records for orders
+orders*.bin 
+
 # Buf / protobuf
