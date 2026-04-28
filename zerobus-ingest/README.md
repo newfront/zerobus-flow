@@ -203,6 +203,27 @@ A common workflow is: **check if the table exists in Databricks; if not, derive 
 - **`table_exists(workspace_client, catalog, schema, table)`** — Returns `True` if the table exists in the metastore.
 - **`descriptor_to_columns(descriptor: Descriptor) -> list[ColumnInfo]`** — Converts a protobuf message `DESCRIPTOR` (e.g. `Order.DESCRIPTOR` from your generated `orders_pb2`) into a list of Unity Catalog `ColumnInfo`. Uses the inverse of the [zerobus generate_proto type mappings](https://github.com/databricks/zerobus-sdk-py/blob/main/zerobus/tools/generate_proto.py): scalars (int32→INT, int64→LONG, string→STRING, etc.), enums→INT, nested messages→`STRUCT<...>`, repeated→`ARRAY<...>`. The result is suitable for `create_table(..., columns=...)`.
 - **`pretty_print_columns(columns: list[ColumnInfo]) -> str`** — Formats a list of `ColumnInfo` as a readable table string (one column per line with name and type). Use this to preview the schema before creating the table.
+- **`get_catalog_info(workspace_client, catalog) -> CatalogInfo`** — Metastore metadata for a catalog (Unity Catalog `GET` catalog by name). Read **`storage_root`** and **`storage_location`** on the result for managed table roots (e.g. the `demos` catalog). Optional args like `include_browse` are passed through to the Databricks client.
+- **`get_schema_info(workspace_client, catalog, schema) -> SchemaInfo`** — Same for a **schema** under a catalog. Uses the full name `"{catalog}.{schema}"` in the API (e.g. `zerobus` in `demos` → `demos.zerobus`). The returned **`SchemaInfo`** also has **`storage_root`** / **`storage_location`** for managed data under that schema.
+
+**Example: read catalog and schema storage roots**
+
+```python
+from databricks.sdk import WorkspaceClient
+from dotenv import load_dotenv
+from zerobus_ingest.config import Config
+from zerobus_ingest.utils import TableUtils
+
+load_dotenv()
+c = Config.databricks()
+w = WorkspaceClient(host=c["host"], token=c["token"])
+
+info = TableUtils.get_catalog_info(w, "demos")
+print("catalog storage_root:", info.storage_root, "storage_location:", info.storage_location)
+
+sinfo = TableUtils.get_schema_info(w, "demos", "zerobus")
+print("schema storage_root:", sinfo.storage_root, "storage_location:", sinfo.storage_location)
+```
 
 **Example: ensure table exists, creating it from the Order protobuf if missing**
 
