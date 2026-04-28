@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.catalog import (
+    CatalogInfo,
     ColumnInfo,
     ColumnTypeName,
     DataSourceFormat,
+    SchemaInfo,
     TableInfo,
     TableType,
 )
@@ -175,6 +179,50 @@ class TableUtils:
     """Helpers to check table existence and other UC table operations."""
 
     @staticmethod
+    def get_catalog_info(
+        workspace_client: WorkspaceClient, catalog: str, **kwargs: Any
+    ) -> CatalogInfo:
+        """Load Unity Catalog metadata for a catalog (e.g. `demos`).
+
+        The returned :class:`CatalogInfo` includes ``storage_root`` and
+        ``storage_location`` when the metastore has them set (managed
+        table roots for the catalog). Pass through optional API flags, e.g.
+        ``include_browse=True`` if needed.
+
+        Args:
+            workspace_client: Authenticated Databricks WorkspaceClient.
+            catalog: Catalog name only (not `catalog.schema`).
+
+        Returns:
+            :class:`CatalogInfo` for ``GET /unity-catalog/catalogs/{name}``.
+        """
+        return workspace_client.catalogs.get(catalog, **kwargs)
+
+    @staticmethod
+    def get_schema_info(
+        workspace_client: WorkspaceClient,
+        catalog: str,
+        schema: str,
+        **kwargs: Any,
+    ) -> SchemaInfo:
+        """Load Unity Catalog metadata for a schema (e.g. catalog `demos`, schema `zerobus`).
+
+        The returned :class:`SchemaInfo` includes ``storage_root`` and
+        ``storage_location`` for managed tables under that schema. Optional
+        API flags, e.g. ``include_browse=True``, are forwarded to the client.
+
+        Args:
+            workspace_client: Authenticated Databricks WorkspaceClient.
+            catalog: Parent catalog name.
+            schema: Schema name (not a full `catalog.schema.table`).
+
+        Returns:
+            :class:`SchemaInfo` for ``GET /unity-catalog/schemas/{catalog.schema}``.
+        """
+        full_name = f"{catalog}.{schema}"
+        return workspace_client.schemas.get(full_name, **kwargs)
+
+    @staticmethod
     def table_exists(
         workspace_client: WorkspaceClient,
         catalog: str,
@@ -236,30 +284,24 @@ class TableUtils:
         catalog: str,
         schema: str,
         table: str,
-        storage_location: str | None = None,
+        storage_location: str,
         *,
-        table_type: TableType = TableType.MANAGED,
         data_source_format: DataSourceFormat = DataSourceFormat.DELTA,
         columns: list[ColumnInfo] | None = None,
         properties: dict[str, str] | None = None,
     ) -> TableInfo:
-        """Create a table in the metastore using the WorkspaceClient.
+        """Create an **external** Delta table via the Unity Catalog REST API.
 
-        Uses the same credentials as the workspace client. Defaults create a
-        managed Delta table. When storage_location is omitted (None), the backend
-        manages the backing storage for managed tables. Pass storage_location only
-        when you need to set it explicitly (e.g. for EXTERNAL tables).
+        The external-client ``tables.create`` API only supports EXTERNAL tables;
+        use :meth:`create_managed_table` to create managed tables from outside a
+        UC-enabled cluster.
 
         Args:
             workspace_client: Authenticated Databricks WorkspaceClient.
             catalog: Unity Catalog catalog name.
             schema: Schema name within the catalog.
             table: Table name within the schema.
-            storage_location: Optional storage root URL. If None, not passed
-            (managed tables
-                use backend-managed storage). Required for EXTERNAL
-                tables—pass explicitly.
-            table_type: TableType (default MANAGED).
+            storage_location: Storage root URL (required for EXTERNAL tables).
             data_source_format: DataSourceFormat (default DELTA).
             columns: Optional list of ColumnInfo for the table schema.
             properties: Optional key-value properties for the table.
@@ -267,21 +309,84 @@ class TableUtils:
         Returns:
             TableInfo for the created table.
         """
-        if storage_location is None and table_type != TableType.MANAGED:
-            raise ValueError(
-                "storage_location is required for non-managed "
-                + "(e.g. EXTERNAL) tables."
-            )
-        # Only pass storage_location when provided; managed tables
-        # use backend-managed storage when None.
-        storage = storage_location if storage_location is not None else ""
         return workspace_client.tables.create(
             name=table,
             catalog_name=catalog,
             schema_name=schema,
-            table_type=table_type,
+            table_type=TableType.EXTERNAL,
             data_source_format=data_source_format,
-            storage_location=storage,
+            storage_location=storage_location,
             columns=columns,
             properties=properties,
         )
+
+    @staticmethod
+    def create_managed_table(
+        workspace_client: WorkspaceClient,
+        catalog: str,
+        schema: str,
+        table: str,
+        columns: list[ColumnInfo],
+        *,
+        warehouse_id: str | None = None,
+        or_replace: bool = False,
+        if_not_exists: bool = True,
+    ) -> TableInfo:
+        """Create a managed Delta table by executing SQL via a SQL warehouse.
+
+        The Unity Catalog REST API's ``tables.create`` endpoint only supports
+        external tables from outside a UC-enabled cluster. This method works
+        around that limitation by submitting a ``CREATE TABLE`` DDL statement
+        through the SQL execution API, which does support managed tables.
+
+        Args:
+            workspace_client: Authenticated Databricks WorkspaceClient.
+            catalog: Unity Catalog catalog name.
+            schema: Schema name within the catalog.
+            table: Table name within the schema.
+            columns: List of ColumnInfo describing the table schema.
+            warehouse_id: SQL warehouse ID to execute against. If None, uses the
+                first available warehouse.
+            or_replace: If True, emits ``CREATE OR REPLACE TABLE``.
+            if_not_exists: If True (default), emits ``CREATE TABLE IF NOT EXISTS``.
+
+        Returns:
+            TableInfo for the created table.
+
+        Raises:
+            RuntimeError: If no SQL warehouse is available or statement fails.
+        """
+        import time
+
+        from databricks.sdk.service.sql import StatementState
+
+        if warehouse_id is None:
+            warehouses = list(workspace_client.warehouses.list())
+            if not warehouses:
+                raise RuntimeError("No SQL warehouses available in this workspace.")
+            warehouse_id = warehouses[0].id
+
+        modifier = "OR REPLACE " if or_replace else ("IF NOT EXISTS " if if_not_exists else "")
+        qualified = f"`{catalog}`.`{schema}`.`{table}`"
+        col_defs = ",\n  ".join(f"`{c.name}` {c.type_text}" for c in columns)
+        ddl = f"CREATE TABLE {modifier}{qualified} (\n  {col_defs}\n) USING DELTA"
+
+        stmt = workspace_client.statement_execution.execute_statement(
+            statement=ddl,
+            warehouse_id=warehouse_id,
+        )
+
+        for _ in range(60):
+            if stmt.status.state not in (StatementState.PENDING, StatementState.RUNNING):
+                break
+            time.sleep(2)
+            stmt = workspace_client.statement_execution.get_statement(stmt.statement_id)
+
+        if stmt.status.state != StatementState.SUCCEEDED:
+            err = stmt.status.error
+            raise RuntimeError(
+                f"CREATE TABLE failed ({stmt.status.state}): "
+                + (f"{err.error_code}: {err.message}" if err else "unknown error")
+            )
+
+        return workspace_client.tables.get(f"{catalog}.{schema}.{table}")
