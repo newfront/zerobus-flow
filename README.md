@@ -4,6 +4,7 @@ that will autoscale to meet your data needs? That is [zerobus](https://www.datab
 
 # Zerobus Ingest
 > **status**: MVP
+
 This is a set of classes and utility methods that assist you in your Databricks Zerobus journey. This includes methods for syncing files between your local project and Unity Catalog volumes, as well as testing for the existance of `tables` and creating tables based off of `protobuf` DESCRIPTORS. At the moment, the `zerobus-ingest` library is written entirely in python, but `rust` flows will be made available as well.
 
 As the API currently stands, you can create a new instance of the `ZerobusWriter` and then simply iterate over a list of `list[T : message.Message]` - where `message` is the `google.protobuf.message` package - and `write` each record to the `zerobus` api endpoint.
@@ -214,7 +215,8 @@ The same pattern applies to `payment_method` in `orders.proto`. The enum types (
 **Rule of thumb:** any field that would be an enum in a pure-proto world should be a `string` with a `buf.validate` `string.in` constraint when targeting Spark / Databricks ingestion.
 
 # Zerobus Flow
-> status: work in progress
+> **status**: work in progress
+
 This is a set of data definitions (protobuf), data generators, and other utility functions that can be used to showcase how easy it is to utilize `zerobus`. Think of this as the typical data client SDK (persona) that is emitting specific data points for different use cases. Each use case is represented by a `Scenario`. This allows us to model real-world experiences like `ecommerce core buy flow` - the process of finding items, putting them in a cart, updating the cart, and eventually ordering, or abandoning said cart.
 
 > All sources pertaining to `zerobus-flow` are in that package.
