@@ -164,6 +164,105 @@ uv run main.py --generate --orders-file orders_10k.bin --count 5
 
 ---
 
+## Running the Demo
+
+The demo publishes sample `Order` protobuf records to a Zerobus stream and queries the resulting Delta table in Unity Catalog. It uses [`just`](https://github.com/casey/just) recipes defined in the root `Justfile`.
+
+### 1. Create a Service Principal
+
+In your Databricks workspace, navigate to:
+
+```
+https://{DATABRICKS_WORKSPACE_URL}/settings/workspace/identity-and-access/service-principals
+```
+
+Create a new service principal. After creation, note the **Application ID** — this is the `CLIENT_ID` used in the grant statements below and in your `.env` as `ZEROBUS_CLIENT_ID`.
+
+### 2. Grant Permissions
+
+Run the following in a Databricks notebook or SQL editor to grant the service principal the minimum permissions needed to write to the demo table. Replace `CLIENT_ID` with the **Application ID** of the service principal you created.
+
+```python
+import os
+
+# zerobus application service principal
+CLIENT_ID = os.environ["ZEROBUS_CLIENT_ID"]
+
+CATALOG = "demos"
+SCHEMA = "zerobus"
+TABLE = "orders"
+
+spark.sql(f"GRANT USE CATALOG ON CATALOG {CATALOG} TO " + "`" + CLIENT_ID + "`;").collect()
+
+# EXTERNAL USE SCHEMA on the catalog
+spark.sql(f"GRANT EXTERNAL USE SCHEMA ON CATALOG {CATALOG} TO " + "`" + CLIENT_ID + "`;").collect()
+
+spark.sql(f"GRANT USE SCHEMA ON SCHEMA {CATALOG}.{SCHEMA} TO " + "`" + CLIENT_ID + "`;").collect()
+
+# EXTERNAL USE SCHEMA on the schema
+spark.sql(f"GRANT EXTERNAL USE SCHEMA ON SCHEMA {CATALOG}.{SCHEMA} TO " + "`" + CLIENT_ID + "`;").collect()
+
+spark.sql(f"GRANT MODIFY, SELECT ON TABLE {CATALOG}.{SCHEMA}.{TABLE} TO " + "`" + CLIENT_ID + "`;").collect()
+```
+
+### 3. Configure `.env`
+
+Make sure your `.env` file has the service principal credentials and Unity Catalog target set:
+
+```env
+ZEROBUS_CLIENT_ID=<Application ID of the service principal>
+ZEROBUS_CLIENT_SECRET=<client secret for the service principal>
+
+UC_CATALOG=demos
+UC_SCHEMA=zerobus
+UC_TABLE=orders
+```
+
+See the [Environment](#environment) section for all required variables.
+
+### 4. Run the Demo
+
+The `Justfile` at the repo root provides the following demo recipes. Run them from the repo root.
+
+| Recipe | Description |
+|---|---|
+| `just bootstrap-demo` | Create the `demos.zerobus.orders` table from the protobuf descriptor if it does not already exist, then print its metadata. |
+| `just demo-zerobus` | Bootstrap (if needed), publish orders via Zerobus, then query and print results. |
+| `just query-zerobus` | Bootstrap (if needed), then print a sample of rows from the table. |
+| `just teardown-demo` | Drop the demo table from Unity Catalog. |
+
+**Full demo (bootstrap + publish + query)**
+
+```bash
+just demo-zerobus
+```
+
+**With custom record and result counts**
+
+```bash
+just count=50 limit=25 demo-zerobus
+```
+
+**Publish only**
+
+```bash
+just count=100 demo-zerobus
+```
+
+**Query only (no publish)**
+
+```bash
+just limit=50 query-zerobus
+```
+
+**Tear down**
+
+```bash
+just teardown-demo
+```
+
+---
+
 ## Releasing artifacts
 
 To release the application (build, sanity-check, test, package, bump version, and publish), run the steps in order. Each step is a Makefile target.
@@ -519,3 +618,5 @@ async with writer as w:
 | `await writer.close()` | Close the stream. Use `async with AsyncZerobusWriter.from_config(config) as writer:` to close automatically. |
 | `AsyncZerobusWriter.get_descriptor(record)` | Static: same as `ZerobusWriter.get_descriptor(record)`. |
 | `ZerobusWriteCallback(inner=..., log_every_n=100)` | Ack callback that logs every N acks and optionally forwards to an inner callback. |
+
+For more details, read the [getting started docs](../docs/zerobus/getting_started.md)

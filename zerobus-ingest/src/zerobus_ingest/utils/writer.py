@@ -7,7 +7,12 @@ import logging
 from typing import Any, Protocol
 
 from google.protobuf.descriptor import Descriptor
-from zerobus.sdk.aio import ZerobusSdk as AioZerobusSdk, ZerobusStream as AioZerobusStream
+from zerobus.sdk.aio import (
+    ZerobusSdk as AioZerobusSdk,
+)
+from zerobus.sdk.aio import (
+    ZerobusStream as AioZerobusStream,
+)
 from zerobus.sdk.shared.definitions import (
     RecordType,
     StreamConfigurationOptions,
@@ -50,10 +55,7 @@ class ZerobusWriteCallback:
                 "Acknowledged up to offset: %s (batch #%s)", offset, self._ack_count
             )
         if self._inner is not None:
-            if callable(self._inner):
-                self._inner(offset)
-            else:
-                self._inner.on_ack(offset)
+            self._inner.on_ack(offset)
 
 
 class ZerobusWriter:
@@ -113,9 +115,7 @@ class ZerobusWriter:
         Build and return ZerobusSdk from config;
         log server_endpoint and unity_catalog_url.
         """
-        server_endpoint = (
-            f"{self._workspace_id}.zerobus.{self._region}.cloud.databricks.com"
-        )
+        server_endpoint = f"{self._workspace_id}.zerobus.{self._region}.cloud.databricks.com"
         unity_catalog_url = self._workplace_url
         logging.info("Server endpoint: %s", server_endpoint)
         logging.info("Unity catalog URL: %s", unity_catalog_url)
@@ -139,9 +139,7 @@ class ZerobusWriter:
         if self._sdk is None:
             self.generate_sdk()
         if descriptor is not None:
-            table_properties = TableProperties(
-                self._table_name, descriptor_proto=descriptor
-            )
+            table_properties = TableProperties(self._table_name, descriptor_proto=descriptor)
         else:
             table_properties = TableProperties(table_name=self._table_name)
         self._stream = self._sdk.create_stream(
@@ -219,9 +217,7 @@ class AsyncZerobusWriter:
         self._client_id = client_id
         self._client_secret = client_secret
         self._table_name = f"{catalog}.{schema}.{table}"
-        self._stream_options = stream_options or _default_async_stream_options(
-            ack_callback
-        )
+        self._stream_options = stream_options or _default_async_stream_options(ack_callback)
         self._sdk: AioZerobusSdk | None = None
         self._stream: AioZerobusStream | None = None
 
@@ -245,9 +241,7 @@ class AsyncZerobusWriter:
             ack_callback=ack_callback,
         )
 
-    def with_stream_options(
-        self, options: StreamConfigurationOptions
-    ) -> AsyncZerobusWriter:
+    def with_stream_options(self, options: StreamConfigurationOptions) -> AsyncZerobusWriter:
         """
         Overwrite stream options.
         Call before any write so they apply when the stream is created.
@@ -256,13 +250,9 @@ class AsyncZerobusWriter:
         return self
 
     def _server_endpoint(self) -> str:
-        return (
-            f"{self._workspace_id}.zerobus.{self._region}.cloud.databricks.com"
-        )
+        return f"{self._workspace_id}.zerobus.{self._region}.cloud.databricks.com"
 
-    async def _ensure_stream(
-        self, descriptor: Descriptor | None = None
-    ) -> AioZerobusStream:
+    async def _ensure_stream(self, descriptor: Descriptor | None = None) -> AioZerobusStream:
         if self._stream is not None:
             return self._stream
         if self._sdk is None:
@@ -274,9 +264,7 @@ class AsyncZerobusWriter:
                 unity_catalog_url=self._workspace_url,
             )
         if descriptor is not None:
-            table_properties = TableProperties(
-                self._table_name, descriptor_proto=descriptor
-            )
+            table_properties = TableProperties(self._table_name, descriptor_proto=descriptor)
         else:
             table_properties = TableProperties(table_name=self._table_name)
         self._stream = await self._sdk.create_stream(
@@ -336,7 +324,5 @@ class AsyncZerobusWriter:
     async def __aenter__(self) -> AsyncZerobusWriter:
         return self
 
-    async def __aexit__(
-        self, exc_type: Any, exc_val: Any, exc_tb: Any
-    ) -> None:
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         await self.close()

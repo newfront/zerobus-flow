@@ -14,6 +14,7 @@ try:
     from orders.v1 import orders_pb2
 except ImportError:
     import sys
+
     _root = Path(__file__).resolve().parent.parent.parent.parent
     _gen = _root / "gen" / "python"
     if str(_gen) not in sys.path:
@@ -75,9 +76,7 @@ def read_orders_from_binary(path: Path | str) -> list[Order]:
     while pos < len(data):
         length, pos = _decode_varint_from_stream(data, pos)
         if pos + length > len(data):
-            raise ValueError(
-                f"Truncated message at byte {pos}: need {length}, have {len(data) - pos}"
-            )
+            raise ValueError(f"Truncated message at byte {pos}: need {length}, have {len(data) - pos}")
         msg = Order()
         msg.ParseFromString(data[pos : pos + length])
         orders.append(msg)

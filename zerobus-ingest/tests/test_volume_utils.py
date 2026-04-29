@@ -19,9 +19,7 @@ def _has_databricks_env() -> bool:
     """True if we have minimal env to create a WorkspaceClient and call the API."""
     import os
 
-    return bool(
-        os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN")
-    )
+    return bool(os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN"))
 
 
 @pytest.mark.skipif(

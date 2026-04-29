@@ -25,7 +25,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 target-version = "py310"
-line-length = 88
+line-length = 105
 src = ["src", "tests", "main.py"]
 
 [tool.ruff.lint]
