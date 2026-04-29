@@ -40,7 +40,7 @@ If you want to compile protos or regenerate descriptors locally, you'll need the
 
 ### 2. Set up your Python environment
 
-From the repo root, sync the virtual environment:
+From the repo root, sync the virtual environment: This will require [just](https://github.com/casey/just) and [uv](https://docs.astral.sh/uv/) in order to run.
 
 ```bash
 just setup
