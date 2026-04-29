@@ -97,8 +97,7 @@ def parse_args():
     parser.add_argument(
         "--create-table",
         action="store_true",
-        help="If the table does not exist, create it using a binary "
-        + "protobuf descriptor.",
+        help="If the table does not exist, create it using a binary " + "protobuf descriptor.",
     )
     parser.add_argument(
         "--descriptor-path",
@@ -112,8 +111,7 @@ def parse_args():
         type=str,
         default=None,
         metavar="NAME",
-        help="Full protobuf message name, e.g. orders.v1.Order (required with "
-        + "--create-table).",
+        help="Full protobuf message name, e.g. orders.v1.Order (required with " + "--create-table).",
     )
     parser.add_argument(
         "--generate-orders-file",
@@ -170,8 +168,7 @@ def main(
             raise ValueError("config is required when --create-table is set")
         if not descriptor_path or not message_name:
             raise ValueError(
-                "--descriptor-path and --message-name are required when "
-                + " --create-table is set"
+                "--descriptor-path and --message-name are required when " + " --create-table is set"
             )
         catalog, schema, table = config["catalog"], config["schema"], config["table"]
         if TableUtils.table_exists(workspace_client, catalog, schema, table):
@@ -179,9 +176,7 @@ def main(
             return
         descriptor = _load_descriptor_from_binary(descriptor_path, message_name)
         columns = TableUtils.descriptor_to_columns(descriptor)
-        TableUtils.create_table(
-            workspace_client, catalog, schema, table, columns=columns
-        )
+        TableUtils.create_table(workspace_client, catalog, schema, table, columns=columns)
         print(f"Created table {catalog}.{schema}.{table}")
 
     if generate:
@@ -212,9 +207,7 @@ def main(
             asyncio.run(_publish_async(orders, config))
         else:
             stream_options = StreamConfigurationOptions(record_type=RecordType.PROTO)
-            with ZerobusWriter.from_config(config).with_stream_options(
-                stream_options
-            ) as writer:
+            with ZerobusWriter.from_config(config).with_stream_options(stream_options) as writer:
                 for order in orders:
                     ack = writer.write(order)
                     ack.wait_for_ack()

@@ -2,13 +2,13 @@
 
 from pathlib import Path
 
-from zerobus_ingest.utils.protobuf_utils import ProtobufUtils
-from zerobus_ingest.utils.table_utils import TableUtils
-from zerobus_ingest.utils.volume_utils import VolumeUtils
 from zerobus_ingest.utils.orders_file import (
     read_orders_from_binary,
     write_orders_to_binary,
 )
+from zerobus_ingest.utils.protobuf_utils import ProtobufUtils
+from zerobus_ingest.utils.table_utils import TableUtils
+from zerobus_ingest.utils.volume_utils import VolumeUtils
 from zerobus_ingest.utils.writer import (
     AsyncZerobusWriter,
     ZerobusWriteCallback,

@@ -53,21 +53,15 @@ def _address(
     return a
 
 
-def _line_item(
-    product_id: str, sku: str, name: str, quantity: int, unit_cents: int
-) -> OrderLineItem:
+def _line_item(product_id: str, sku: str, name: str, quantity: int, unit_cents: int) -> OrderLineItem:
     total_cents = quantity * unit_cents
     item = OrderLineItem()
     item.product_id = product_id
     item.sku = sku
     item.name = name
     item.quantity = quantity
-    item.unit_price.CopyFrom(
-        _money("USD", unit_cents // 100, (unit_cents % 100) * 10_000_000)
-    )
-    item.total_price.CopyFrom(
-        _money("USD", total_cents // 100, (total_cents % 100) * 10_000_000)
-    )
+    item.unit_price.CopyFrom(_money("USD", unit_cents // 100, (unit_cents % 100) * 10_000_000))
+    item.total_price.CopyFrom(_money("USD", total_cents // 100, (total_cents % 100) * 10_000_000))
     return item
 
 
@@ -118,9 +112,7 @@ class Orders:
                 qty = random.randint(1, 3)
                 item = _line_item(prod_id, sku, name, qty, unit_cents)
                 line_items.append(item)
-                subtotal_cents += item.total_price.units * 100 + (
-                    item.total_price.nanos // 10_000_000
-                )
+                subtotal_cents += item.total_price.units * 100 + (item.total_price.nanos // 10_000_000)
             tax_cents = int(subtotal_cents * 0.08)
             shipping_cents = 599 if subtotal_cents < 5000 else 0
             total_cents = subtotal_cents + tax_cents + shipping_cents
@@ -134,21 +126,13 @@ class Orders:
             o.status = OrderStatus.Name(OrderStatus.ORDER_STATUS_CONFIRMED)
             o.line_items.extend(line_items)
             o.subtotal.CopyFrom(
-                _money(
-                    "USD", subtotal_cents // 100, (subtotal_cents % 100) * 10_000_000
-                )
+                _money("USD", subtotal_cents // 100, (subtotal_cents % 100) * 10_000_000)
             )
-            o.tax.CopyFrom(
-                _money("USD", tax_cents // 100, (tax_cents % 100) * 10_000_000)
-            )
+            o.tax.CopyFrom(_money("USD", tax_cents // 100, (tax_cents % 100) * 10_000_000))
             o.shipping_cost.CopyFrom(
-                _money(
-                    "USD", shipping_cents // 100, (shipping_cents % 100) * 10_000_000
-                )
+                _money("USD", shipping_cents // 100, (shipping_cents % 100) * 10_000_000)
             )
-            o.total.CopyFrom(
-                _money("USD", total_cents // 100, (total_cents % 100) * 10_000_000)
-            )
+            o.total.CopyFrom(_money("USD", total_cents // 100, (total_cents % 100) * 10_000_000))
             o.shipping_address.CopyFrom(_address(line_1, city, state, zip_code, "US"))
             o.billing_address.CopyFrom(_address(line_1, city, state, zip_code, "US"))
             o.payment_method = PaymentMethod.Name(PaymentMethod.PAYMENT_METHOD_CARD)

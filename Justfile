@@ -13,6 +13,16 @@ count := "100"
 # Number of records to query
 limit := "100"
 
+# (Re)create the virtual environment. Run once after cloning or if the venv becomes stale.
+setup:
+    @cd {{ingest_dir}} && uv sync
+
+# Build protos, generate descriptor, and run tests to verify everything is ready.
+preflight:
+    @cd {{ingest_dir}} && make build
+    @cd {{ingest_dir}} && make descriptor
+    @cd {{ingest_dir}} && make test
+
 # Setup demo table from protobuf descriptor if missing.
 bootstrap-demo:
     @cd {{ingest_dir}} && uv run python scripts/demo_just.py bootstrap \

@@ -60,9 +60,7 @@ def _field_to_type_json(field: FieldDescriptor, depth: int = 0) -> str:
         fields_json = []
         for i, f in enumerate(msg_desc.fields, start=1):
             fj = _field_to_type_json(f, depth + 1)
-            fields_json.append(
-                f'{{"name": "{f.name}", "type": {fj}, "nullable": true}}'
-            )
+            fields_json.append(f'{{"name": "{f.name}", "type": {fj}, "nullable": true}}')
         return '{"type": "struct", "fields": [' + ", ".join(fields_json) + "]}"
     if kind == FieldDescriptor.TYPE_ENUM:
         return '{"type": "integer"}'
@@ -119,9 +117,7 @@ def _descriptor_to_columns_impl(descriptor: Descriptor) -> list[ColumnInfo]:
             else:
                 scalar = _PROTO_SCALAR_TO_UC.get(
                     field.type,
-                    ColumnTypeName.STRING
-                    if field.type == FieldDescriptor.TYPE_ENUM
-                    else None,
+                    ColumnTypeName.STRING if field.type == FieldDescriptor.TYPE_ENUM else None,
                 )
                 if field.type == FieldDescriptor.TYPE_ENUM:
                     scalar = ColumnTypeName.INT
@@ -179,9 +175,7 @@ class TableUtils:
     """Helpers to check table existence and other UC table operations."""
 
     @staticmethod
-    def get_catalog_info(
-        workspace_client: WorkspaceClient, catalog: str, **kwargs: Any
-    ) -> CatalogInfo:
+    def get_catalog_info(workspace_client: WorkspaceClient, catalog: str, **kwargs: Any) -> CatalogInfo:
         """Load Unity Catalog metadata for a catalog (e.g. `demos`).
 
         The returned :class:`CatalogInfo` includes ``storage_root`` and
@@ -270,11 +264,7 @@ class TableUtils:
         name_width = max(len(c.name) for c in columns)
         lines = []
         for c in columns:
-            type_str = (
-                c.type_text
-                if c.type_text
-                else (c.type_name.name if c.type_name else "?")
-            )
+            type_str = c.type_text if c.type_text else (c.type_name.name if c.type_name else "?")
             lines.append(f"  {c.name:<{name_width}}  {type_str}")
         return "\n".join(lines)
 
@@ -377,7 +367,10 @@ class TableUtils:
         )
 
         for _ in range(60):
-            if stmt.status.state not in (StatementState.PENDING, StatementState.RUNNING):
+            if stmt.status.state not in (
+                StatementState.PENDING,
+                StatementState.RUNNING,
+            ):
                 break
             time.sleep(2)
             stmt = workspace_client.statement_execution.get_statement(stmt.statement_id)
